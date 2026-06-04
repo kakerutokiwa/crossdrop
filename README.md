@@ -1,36 +1,137 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CrossDrop | インスタントP2Pファイル共有システム
 
-## Getting Started
+CrossDropは、AirDropのようにシームレスで美しいユーザー体験を提供する、Webベースおよびデスクトップ向けの超高速P2P（Peer-to-Peer）ローカルファイル共有アプリケーションです。
 
-First, run the development server:
+---
 
+## 1. アプリ概要
+
+CrossDropは、WebRTC技術を利用してデバイス間で直接（P2P）ファイルを送信します。サーバーを介さずにデバイス間で直接暗号化されたデータ転送が行われるため、プライバシーが守られ、かつ高速な転送が可能です。
+
+### 技術スタック
+- **フロントエンド**: Next.js 16 (React 19, TypeScript)
+- **デスクトップランタイム**: Tauri v2 (Rust)
+- **スタイリング**: Tailwind CSS v4 / Vanilla CSS
+- **アニメーション/エフェクト**: Framer Motion, Canvas Confetti
+- **シグナリング**: Firebase Realtime Database / HTML5 BroadcastChannel API (Mockモード)
+
+---
+
+## 2. アプリの仕様と技術詳細
+
+CrossDropは、WebブラウザとTauri（デスクトップアプリ）の双方に対応したハイブリッドな設計になっています。
+
+### A. WebRTCによるP2Pファイル転送
+- **データチャネル (RTCDataChannel)**: `ordered: true`（順序保証）で動作するバイナリ転送用チャネルを使用。
+- **チャンク分割転送**: 大容量ファイルを効率よく送受信するため、ファイルを **64KB** ごとのチャンクに分割してストリーミング送信します。
+- **流量制御 (Flow Control)**: 送信側のバッファ量（`bufferedAmount`）が **1MB** を超過した場合、自動で送信を一時停止し、バッファが消費された段階（`onbufferedamountlow` イベント）で再開します。これにより、メモリのオーバーフローや接続の切断を防ぎます。
+
+### B. ハイブリッドシグナリング仕様
+WebRTCの接続確立（SDPおよびICE Candidateの交換）を行うため、2つのシグナリング方式を自動で切り替えます。
+1. **Firebase モード (オンライン)**:
+   - 環境変数が設定されている場合に動作。
+   - Firebase Realtime Database の `rooms/{pin}/devices` で端末のオンライン状態（プレゼンス）を管理し、`rooms/{pin}/signals/{deviceId}` を介してシグナリングメッセージを中継します。
+   - シグナリング成功後は速やかにP2P接続を確立し、DB内の一時シグナルデータは自動で削除（消費）されます。
+2. **Mock モード (ローカル/オフライン)**:
+   - Firebaseの環境変数が設定されていない場合、自動的に **BroadcastChannel API**（`crossdrop-room-{pin}`）を利用したモックモードに移行します。
+   - 同一マシン内の異なるブラウザタブやウィンドウ間で、Firebaseを使用せずに完全なWebRTC P2Pファイル転送のシミュレーションとテストが可能です。
+
+### C. 実行環境ごとの最適化
+| 機能・仕様 | Tauri デスクトップアプリ版 | Webブラウザ版 (Chrome/Safari/モバイル等) |
+| :--- | :--- | :--- |
+| **ファイル保存方法** | 受信チャンクを随時ディスクへ直接書き込み (`@tauri-apps/plugin-fs`) | 全チャンクをメモリ（RAM）上に蓄積し、完了後にBlobとしてDL |
+| **メモリ制限** | 直接保存のため大容量ファイルでもメモリを圧迫しない | ブラウザのRAM容量に依存 (大容量ファイルはブラウザの制限を受ける) |
+| **既定の保存先** | システムの「ダウンロード」フォルダ（設定で変更可能） | ブラウザで設定されている既定のダウンロード先 |
+| **通知機能** | システム通知 (`@tauri-apps/plugin-notification`) | Web通知 (非対応/権限に依存) |
+| **常駐機能** | システムトレイ常駐（最小化/復帰、終了制御可能） | なし（タブを閉じると終了） |
+
+---
+
+## 3. 開発環境の構築と起動方法
+
+### 前提条件
+- **Node.js**: v18以上 (推奨v20以上)
+- **Rust/Cargo**: (Tauriアプリをビルド/実行する場合のみ)
+
+### 開発サーバーの立ち上げ手順
+
+#### 1. 依存関係のインストール
+プロジェクトのルートディレクトリで以下のコマンドを実行します。
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+#### 2. 環境変数の設定 (オプション)
+Firebaseを使った実デバイス間（PCとスマホなど）の通信を行う場合は、`.env.local` ファイルを作成し、Firebase Realtime Databaseの接続情報を設定します。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> [!TIP]
+> `.env.local` を設定しなくても、同一PCの複数ブラウザタブ間であれば **Mockモード** で即座にP2P転送テストが可能です。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`.env.local` の設定例：
+```env
+NEXT_PUBLIC_FIREBASE_API_KEY=your-api-key
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-auth-domain.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_DATABASE_URL=https://your-db-url.firebaseio.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-storage-bucket.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-sender-id
+NEXT_PUBLIC_FIREBASE_APP_ID=your-app-id
+```
 
-## Learn More
+#### 3. 開発サーバーの起動
 
-To learn more about Next.js, take a look at the following resources:
+##### Webブラウザ版として開発・検証する場合
+Next.jsの開発サーバーのみを起動します。
+```bash
+npm run dev
+```
+起動後、ブラウザで [http://localhost:3000](http://localhost:3000) にアクセスします。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+##### Tauri（デスクトップアプリ版）として開発・検証する場合
+Next.jsを起動した状態で、Tauriのデバッグウィンドウを立ち上げます。
+```bash
+npx tauri dev
+```
+*※ `tauri.conf.json` の設定により、自動的に `beforeDevCommand` として `npm run dev` が裏で実行されます。*
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 4. アプリの使い方・操作手順
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### ステップ1: 初期セットアップ（初回起動時）
+1. アプリを起動すると、セットアップ（オンボーディング）画面が表示されます。
+2. 他のデバイスから識別しやすい **「表示名」** を入力し、好みの **「アバター」** を選択します。
+3. **「はじめる」** ボタンを押すとメイン画面に遷移します。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### ステップ2: ルームへ入室・接続
+1. 接続したい双方のデバイスでアプリを開きます。
+2. 画面上部に表示されている **「ルーム PIN コード（4桁の数字）」** を確認します。
+3. **「受け取る」タブ** を選択すると、その端末の受信待ち用PINコードが表示されます。
+4. 送信側の端末のルームPINコードを、受信側と同じPINコードに合わせることで、自動的にシグナリングが行われ、レーダー（「送信する」タブ）に相手のデバイスが表示されます。
+
+> [!NOTE]
+> Firebaseが未設定の場合（Mockモード）は、同一PC上で複数のタブを開き、それぞれ同じPINコードを設定することで接続できます。
+
+### ステップ3: ファイルを送信する
+1. **「送信する」タブ** を開きます。
+2. 接続可能なデバイス一覧に、ペアリングされた相手のデバイス名とアバターが表示されます。
+3. **送信方法 A (タップ/クリック)**:
+   - 相手のデバイスパネルをクリックします。
+   - ファイル選択ダイアログが開くので、送信したいファイルを選択します。
+4. **送信方法 B (ドラッグ＆ドロップ)**:
+   - 送信したいファイルをアプリのウィンドウ内にドラッグします。
+   - 画面がドロップ領域に切り替わるので、ドロップすると自動的に一覧の先頭のデバイスへ送信が開始されます。
+
+### ステップ4: 受信と保存
+1. 送信が開始されると、画面下部の **「転送中」** セクションに進行状況が表示されます（進行率 %、現在の転送速度、残り時間がリアルタイムに計算されます）。
+2. 転送が完了すると、画面に紙吹雪（Confetti）が舞い、完了を知らせます。
+3. **保存場所**:
+   - **Tauri版**: 設定された保存先（デフォルトは「ダウンロード」フォルダ）に自動でファイルが保存され、システム通知が表示されます。
+   - **ブラウザ版**: 転送完了時に自動でWebブラウザのファイルダウンロード処理が走り、ブラウザ規定のダウンロード先に保存されます。
+
+### 設定の変更
+画面右上にある ⚙️ (歯車) アイコンをクリックすると、設定モーダルが開きます。
+- **一般**: 自動起動やトレイへの格納設定（Tauri版のみ）。
+- **接続**: 送信後もP2P接続を維持するかどうかの設定、PINの再生成。
+- **保存先**: 受信ファイルの保存先フォルダの変更（Tauri版のみ）、同名ファイルが存在する場合の上書き回避（自動リネーム）のON/OFF。
+- **外観**: ダーク/ライト/システム同期テーマの切り替え、ウィンドウ背景の透明度やアニメーション密度の調整。
