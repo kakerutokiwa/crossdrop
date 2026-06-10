@@ -1141,7 +1141,7 @@ export default function CrossDropApp() {
                 <div className="flex items-center gap-6">
                   <span className="flex items-center gap-1.5 font-semibold">
                     <div className="w-1.5 h-1.5 rounded-full bg-accent" />
-                    CrossDrop v0.1.0
+                    CrossDrop v1.0.5
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)]" /> P2P接続中
