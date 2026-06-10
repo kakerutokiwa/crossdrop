@@ -1,5 +1,5 @@
 @import "tailwindcss";
-
+@source "../components";
 /* ============================================================
    CrossDrop Design Tokens — Apple HIG compliant
    ============================================================ */
@@ -162,6 +162,20 @@ body {
 
 .ping-slow {
   animation: ping-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ============================================================
+   Scanner Laser Animation
+   ============================================================ */
+
+@keyframes scanner-laser {
+  0%   { top: 0%; }
+  50%  { top: 100%; }
+  100% { top: 0%; }
+}
+
+@utility animate-scanner {
+  animation: scanner-laser 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 /* ============================================================

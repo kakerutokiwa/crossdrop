@@ -38,6 +38,15 @@ export interface SignalMessage {
   payload: unknown;
 }
 
+export type SignalingStatus =
+  | "initializing"
+  | "authenticating"
+  | "authenticated"
+  | "connected"
+  | "auth_error"
+  | "db_error"
+  | "mock";
+
 export function useFirebaseSignaling(
   deviceId: string,
   deviceName: string,
@@ -47,8 +56,14 @@ export function useFirebaseSignaling(
 ) {
   const [peers, setPeers] = useState<Device[]>([]);
   const isMock = !isFirebaseConfigured;
+  const [connectionStatus, setConnectionStatus] = useState<SignalingStatus>(
+    isMock ? "mock" : "initializing"
+  );
   const onSignalReceivedRef = useRef<((msg: SignalMessage) => void) | null>(null);
   
+  const serverTimeOffsetRef = useRef<number>(0);
+  const getSyncedTime = () => Date.now() + serverTimeOffsetRef.current;
+
   // Use refs to prevent stale closures in event listeners
   const infoRef = useRef({ deviceId, deviceName, deviceAvatar, pin, isTauri });
   useEffect(() => {
@@ -211,6 +226,13 @@ export function useFirebaseSignaling(
       const auth = getAuth(app);
       const db = getDatabase(app);
 
+      // Synchronize with Firebase server time
+      const offsetRef = ref(db, ".info/serverTimeOffset");
+      const unsubscribeOffset = onValue(offsetRef, (snap) => {
+        serverTimeOffsetRef.current = snap.val() || 0;
+        console.log(`[Signaling] Firebase server time offset: ${serverTimeOffsetRef.current}ms`);
+      });
+
       let isUnmounted = false;
       let cleanupDatabase = () => {};
 
@@ -231,9 +253,14 @@ export function useFirebaseSignaling(
           avatar: deviceAvatar,
           pin: pin,
           isTauri: isTauri,
-          lastActive: Date.now(),
+          lastActive: getSyncedTime(),
+        }).then(() => {
+          if (!isUnmounted) {
+            setConnectionStatus("connected");
+          }
         }).catch((err) => {
           console.error("[Signaling] Failed to register presence in database (check rules):", err);
+          setConnectionStatus("db_error");
         });
 
         // 2. Listen for peers
@@ -242,7 +269,7 @@ export function useFirebaseSignaling(
           const val = snapshot.val();
           if (val) {
             const list = Object.values(val) as Device[];
-            const now = Date.now();
+            const now = getSyncedTime();
             
             // Filter out self and any peer whose lastActive is older than 20 seconds
             const filtered = list.filter(
@@ -261,8 +288,12 @@ export function useFirebaseSignaling(
           } else {
             setPeers([]);
           }
+          if (!isUnmounted) {
+            setConnectionStatus("connected");
+          }
         }, (err) => {
           console.error("[Signaling] Peer listener permission error:", err);
+          setConnectionStatus("db_error");
         });
 
         // 3. Listen for signals directed to me
@@ -302,7 +333,7 @@ export function useFirebaseSignaling(
 
       // Periodically update our own presence lastActive timestamp and prune stale local peers
       const dbInterval = setInterval(() => {
-        const now = Date.now();
+        const now = getSyncedTime();
         try {
           const myPresenceRef = ref(db, `rooms/${pin}/devices/${deviceId}`);
           set(myPresenceRef, {
@@ -326,15 +357,18 @@ export function useFirebaseSignaling(
       }, 5000);
 
       // Authenticate anonymously to comply with database rules requiring authenticated requests
+      setConnectionStatus("authenticating");
       signInAnonymously(auth)
         .then(() => {
           if (isUnmounted) return;
           console.log(`[Signaling] Firebase authenticated anonymously`);
+          setConnectionStatus("authenticated");
           setupDatabaseConnection();
         })
         .catch((err) => {
           console.warn("[Signaling] Firebase anonymous authentication failed:", err);
           console.log("[Signaling] Falling back to unauthenticated database connection (rules may be public)...");
+          setConnectionStatus("auth_error");
           setupDatabaseConnection();
         });
 
@@ -342,6 +376,7 @@ export function useFirebaseSignaling(
         isUnmounted = true;
         clearInterval(dbInterval);
         cleanupDatabase();
+        unsubscribeOffset();
       };
     }
 
@@ -353,7 +388,7 @@ export function useFirebaseSignaling(
   // Update presence details immediately in the database or broadcast channel when name or avatar changes
   useEffect(() => {
     if (!pin) return;
-    const now = Date.now();
+    const now = getSyncedTime();
     if (isMock) {
       if (broadcastChannelRef.current) {
         broadcastChannelRef.current.postMessage({
@@ -393,6 +428,7 @@ export function useFirebaseSignaling(
     sendSignal,
     registerSignalHandler,
     isMock,
+    connectionStatus,
   };
 }
 

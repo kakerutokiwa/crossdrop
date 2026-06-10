@@ -15,11 +15,28 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://crossdrop.netlify.app"),
   title: "CrossDrop | インスタントP2Pファイル共有",
   description: "CrossDropは、AirDropのようにシームレスで美しい、Webベースの超高速P2Pローカルファイル共有アプリケーションです。",
-  keywords: ["file share", "P2P", "WebRTC", "AirDrop clone", "local share", "CrossDrop"],
+  keywords: ["file share", "P2P", "WebRTC", "AirDrop clone", "local share", "CrossDrop", "ファイル共有", "P2Pファイル転送"],
   authors: [{ name: "CrossDrop Team" }],
   manifest: "/manifest.json",
+  openGraph: {
+    title: "CrossDrop | インスタントP2Pファイル共有",
+    description: "CrossDropは、AirDropのようにシームレスで美しい、Webベースの超高速P2Pローカルファイル共有アプリケーションです。",
+    url: "https://crossdrop.netlify.app",
+    siteName: "CrossDrop",
+    locale: "ja_JP",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "CrossDrop | インスタントP2Pファイル共有",
+    description: "CrossDropは、AirDropのようにシームレスで美しい、Webベースの超高速P2Pローカルファイル共有アプリケーションです。",
+  },
+  alternates: {
+    canonical: "/",
+  },
 };
 
 export const viewport: Viewport = {
@@ -41,6 +58,25 @@ export default function RootLayout({
       style={{ fontFamily: "var(--font-outfit), var(--font-inter), sans-serif" }}
     >
       <body className="h-full min-h-full flex flex-col no-scrollbar">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "SoftwareApplication",
+              "name": "CrossDrop",
+              "operatingSystem": "Windows, macOS, Linux, Android, iOS",
+              "applicationCategory": "UtilityApplication",
+              "description": "CrossDropは、AirDropのようにシームレスで美しい、Webベースの超高速P2Pローカルファイル共有アプリケーションです。",
+              "url": "https://crossdrop.netlify.app",
+              "offers": {
+                "@type": "Offer",
+                "price": "0",
+                "priceCurrency": "USD",
+              },
+            }),
+          }}
+        />
         {children}
       </body>
     </html>
