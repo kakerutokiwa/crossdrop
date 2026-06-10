@@ -5,21 +5,21 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getDatabase, ref, set, onValue, push, onChildAdded, remove, off, serverTimestamp, onDisconnect } from "firebase/database";
 import { getAuth, signInAnonymously } from "firebase/auth";
 
-// Firebase Config interface
+// Firebase Config configuration
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyCYVWBR9DSVDXk1o3D_wXavnIITl7HNnvI",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "crossdrop-f17d5.firebaseapp.com",
+  databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL || "https://crossdrop-f17d5-default-rtdb.firebaseio.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "crossdrop-f17d5",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "crossdrop-f17d5.firebasestorage.app",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "951224428476",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:951224428476:web:daa22e3cd3af2306036db9",
 };
 
-// Check if Firebase env variables are configured
+// Firebase is configured if either environment variables are present OR we use the default fallback configurations
 const isFirebaseConfigured = !!(
-  process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL &&
-  process.env.NEXT_PUBLIC_FIREBASE_API_KEY
+  firebaseConfig.databaseURL &&
+  firebaseConfig.apiKey
 );
 
 export interface Device {
