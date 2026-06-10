@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "crossdrop",
+  "productName": "CrossDrop",
   "version": "1.0.4",
   "identifier": "com.crossdrop.desktop",
   "build": {

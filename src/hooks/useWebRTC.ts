@@ -22,16 +22,25 @@ export interface TransferProgress {
   timeLeft: number; // seconds
   status: "pending" | "connecting" | "transferring" | "completed" | "failed";
   type: "send" | "receive";
+  savedPath?: string;
 }
 
 export function useWebRTC(
   deviceId: string,
   sendSignal: (targetDeviceId: string, type: "offer" | "answer" | "candidate", payload: unknown) => Promise<void>,
-  isTauri: boolean
+  isTauri: boolean,
+  saveDirectory: string,
+  customSaveDir: string,
+  askSavePath: boolean
 ) {
   const [transfers, setTransfers] = useState<Record<string, TransferProgress>>({});
   const [connectionStates, setConnectionStates] = useState<Record<string, RTCPeerConnectionState>>({});
   
+  const saveConfigRef = useRef({ saveDirectory, customSaveDir, askSavePath });
+  useEffect(() => {
+    saveConfigRef.current = { saveDirectory, customSaveDir, askSavePath };
+  }, [saveDirectory, customSaveDir, askSavePath]);
+
   const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
   const dataChannelsRef = useRef<Record<string, RTCDataChannel>>({});
   const activeTransfersRef = useRef<Record<string, {
@@ -87,6 +96,75 @@ export function useWebRTC(
         console.error("Error closing data channel:", e);
       }
       delete dataChannelsRef.current[targetDeviceId];
+    }
+  };
+
+  const resolveTauriSavePath = async (fileId: string, fileName: string) => {
+    try {
+      const config = saveConfigRef.current;
+      let finalPath = "";
+
+      if (config.askSavePath) {
+        // Prompt user for save path using Tauri save dialog
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const selectedPath = await save({
+          defaultPath: fileName,
+        });
+        if (selectedPath) {
+          finalPath = selectedPath;
+        } else {
+          console.warn("[WebRTC] User cancelled save dialog. Cancelling transfer.");
+          updateTransfer(fileId, { status: "failed" });
+          return;
+        }
+      } else {
+        // Automatic save
+        let targetDir = "";
+        if (config.saveDirectory === "custom" && config.customSaveDir) {
+          targetDir = config.customSaveDir;
+        } else {
+          const { downloadDir } = await import("@tauri-apps/api/path");
+          targetDir = await downloadDir();
+        }
+
+        const { exists } = await import("@tauri-apps/plugin-fs");
+        let filePath = `${targetDir}/${fileName}`;
+        
+        // Simple automatic renaming if file exists: "file.txt" -> "file (1).txt"
+        const dotIdx = fileName.lastIndexOf(".");
+        const baseName = dotIdx !== -1 ? fileName.substring(0, dotIdx) : fileName;
+        const ext = dotIdx !== -1 ? fileName.substring(dotIdx) : "";
+        
+        let counter = 1;
+        while (await exists(filePath)) {
+          filePath = `${targetDir}/${baseName} (${counter})${ext}`;
+          counter++;
+        }
+        
+        finalPath = filePath;
+      }
+
+      const meta = activeTransfersRef.current[fileId];
+      if (meta) {
+        meta.tauriFilePath = finalPath;
+        console.log(`[WebRTC] Tauri save path resolved: ${finalPath}`);
+
+        // If we have already accumulated some chunks in RAM, write them out now
+        if (meta.receivedChunks.length > 0) {
+          const { writeFile } = await import("@tauri-apps/plugin-fs");
+          console.log(`[WebRTC] Writing ${meta.receivedChunks.length} accumulated chunks to ${finalPath}`);
+          
+          for (const chunk of meta.receivedChunks) {
+            const dataBytes = new Uint8Array(chunk);
+            await writeFile(finalPath, dataBytes, { append: true });
+          }
+          // Clear RAM array to prevent memory leak
+          meta.receivedChunks = [];
+        }
+      }
+    } catch (e) {
+      console.error("[WebRTC] Failed to resolve Tauri save path:", e);
+      updateTransfer(fileId, { status: "failed" });
     }
   };
 
@@ -257,16 +335,7 @@ export function useWebRTC(
 
             // In Tauri mode: prepare file save path
             if (isTauri) {
-              try {
-                const { downloadDir } = await import("@tauri-apps/api/path");
-                
-                // Get system downloads path
-                const dlPath = await downloadDir();
-                const filePath = `${dlPath}/${name}`;
-                activeTransfersRef.current[fileId].tauriFilePath = filePath;
-              } catch (e) {
-                console.error("Tauri FS preparation failed, falling back to RAM buffer:", e);
-              }
+              resolveTauriSavePath(fileId, name);
             }
 
             setTransfers((prev) => ({
@@ -296,7 +365,7 @@ export function useWebRTC(
 
             if (isTauri && meta.tauriFilePath) {
               // File is already saved chunk-by-chunk
-              updateTransfer(fileId, { progress: 100, status: "completed", speed: 0, timeLeft: 0 });
+              updateTransfer(fileId, { progress: 100, status: "completed", speed: 0, timeLeft: 0, savedPath: meta.tauriFilePath });
               
               // Trigger a system notification in Tauri
               try {
@@ -379,6 +448,9 @@ export function useWebRTC(
             const { writeFile } = await import("@tauri-apps/plugin-fs");
             const dataBytes = new Uint8Array(arrayBuffer);
             await writeFile(meta.tauriFilePath, dataBytes, { append: true });
+            
+            // Clear RAM array to prevent memory leak since we are writing directly to disk
+            meta.receivedChunks = [];
           } catch (e) {
             console.error("Tauri direct disk write error:", e);
           }

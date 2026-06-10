@@ -145,8 +145,18 @@ export default function CrossDropApp() {
   const [tempAvatar, setTempAvatar] = useState("av-1");
 
   // Connection settings
-  const [saveDirectory, setSaveDirectory] = useState<string>("Downloads");
-  const [customSaveDir, setCustomSaveDir] = useState<string>("");
+  const [saveDirectory, setSaveDirectory] = useState<string>(() => {
+    if (typeof window === "undefined") return "Downloads";
+    return localStorage.getItem("crossdrop-save-directory") || "Downloads";
+  });
+  const [customSaveDir, setCustomSaveDir] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("crossdrop-custom-save-dir") || "";
+  });
+  const [askSavePath, setAskSavePath] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("crossdrop-ask-save-path") === "true";
+  });
   const [opacity, setOpacity] = useState<number>(90);
   const [animationLevel, setAnimationLevel] = useState<number>(100);
 
@@ -360,7 +370,7 @@ export default function CrossDropApp() {
     handleSignal,
     sendFile,
     cancelTransfer,
-  } = useWebRTC(deviceId, sendSignal, isTauri);
+  } = useWebRTC(deviceId, sendSignal, isTauri, saveDirectory, customSaveDir, askSavePath);
 
   // Register signal handler for incoming WebRTC signals
   useEffect(() => {
@@ -406,6 +416,52 @@ export default function CrossDropApp() {
     localStorage.setItem("crossdrop-manual-pin", newPin);
     setIsManualPin(true);
     setPin(newPin);
+  };
+
+  // Context Menu State for Reveal in Finder/Explorer
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    savedPath?: string;
+  }>({ visible: false, x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleGlobalClick = () => {
+      if (contextMenu.visible) {
+        setContextMenu(prev => ({ ...prev, visible: false }));
+      }
+    };
+    window.addEventListener("click", handleGlobalClick);
+    return () => window.removeEventListener("click", handleGlobalClick);
+  }, [contextMenu.visible]);
+
+  const handleRevealFile = async (savedPath?: string) => {
+    if (!savedPath || !isTauri) return;
+    try {
+      const { open } = await import("@tauri-apps/plugin-shell");
+      // Find parent directory path
+      const lastSlash = Math.max(savedPath.lastIndexOf("/"), savedPath.lastIndexOf("\\"));
+      if (lastSlash !== -1) {
+        const parentDir = savedPath.substring(0, lastSlash);
+        await open(parentDir);
+      } else {
+        await open(savedPath);
+      }
+    } catch (e) {
+      console.error("Failed to reveal folder:", e);
+    }
+  };
+
+  const handleHistoryItemContextMenu = (e: React.MouseEvent, savedPath?: string) => {
+    if (!isTauri || !savedPath) return;
+    e.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      savedPath,
+    });
   };
 
   // File selection triggering
@@ -1031,7 +1087,11 @@ export default function CrossDropApp() {
                     </div>
                   ) : (
                     recentTransfers.slice(-3).reverse().map((tr) => (
-                      <div key={tr.fileId} className="bg-surface-secondary/15 border border-glass-border/40 rounded-2xl p-3.5 flex items-center gap-3 hover:bg-surface-secondary/30 transition-all duration-200">
+                      <div 
+                        key={tr.fileId} 
+                        className={`bg-surface-secondary/15 border border-glass-border/40 rounded-2xl p-3.5 flex items-center gap-3 hover:bg-surface-secondary/30 transition-all duration-200 ${isTauri && tr.savedPath ? "cursor-context-menu" : ""}`}
+                        onContextMenu={(e) => handleHistoryItemContextMenu(e, tr.savedPath)}
+                      >
                         <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
                           tr.status === "completed" 
                             ? "bg-[var(--green)]/15 text-[var(--green)]" 
@@ -1048,6 +1108,18 @@ export default function CrossDropApp() {
                         <div className="flex items-center gap-1.5 flex-shrink-0">
                           {tr.status === "completed" ? (
                             <>
+                              {isTauri && tr.savedPath && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRevealFile(tr.savedPath);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-surface-secondary hover:bg-surface-tertiary border border-glass-border text-text-secondary hover:text-white transition-all cursor-pointer mr-1"
+                                  title="保存フォルダを開く"
+                                >
+                                  <Folder className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <Check className="w-3.5 h-3.5 text-[var(--green)]" />
                               <span className="text-[10px] font-semibold text-[var(--green)]">完了</span>
                             </>
@@ -1141,7 +1213,12 @@ export default function CrossDropApp() {
                             </div>
                           ) : (
                             recentTransfers.slice().reverse().map((tr) => (
-                              <div key={tr.fileId} className="bg-surface-secondary/30 border border-glass-border/40" style={{ padding: '16px', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                              <div 
+                                key={tr.fileId} 
+                                className={`bg-surface-secondary/30 border border-glass-border/40 ${isTauri && tr.savedPath ? "cursor-context-menu" : ""}`} 
+                                style={{ padding: '16px', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '16px' }}
+                                onContextMenu={(e) => handleHistoryItemContextMenu(e, tr.savedPath)}
+                              >
                                 <div className={`rounded-lg flex items-center justify-center flex-shrink-0 ${
                                   tr.status === "completed" 
                                     ? "bg-[var(--green)]/10 text-[var(--green)]" 
@@ -1156,7 +1233,21 @@ export default function CrossDropApp() {
                                   </p>
                                 </div>
                                 {tr.status === "completed" ? (
-                                  <Check className="w-5 h-5 text-[var(--green)] flex-shrink-0" />
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    {isTauri && tr.savedPath && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleRevealFile(tr.savedPath);
+                                        }}
+                                        className="p-1.5 rounded-lg bg-surface-secondary hover:bg-surface-tertiary border border-glass-border text-text-secondary hover:text-white transition-all cursor-pointer"
+                                        title="保存フォルダを開く"
+                                      >
+                                        <Folder className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                    <Check className="w-5 h-5 text-[var(--green)]" />
+                                  </div>
                                 ) : (
                                   <X className="w-5 h-5 text-[var(--red)] flex-shrink-0" />
                                 )}
@@ -1716,40 +1807,68 @@ export default function CrossDropApp() {
                   )}
 
                   {settingsTab === "files" && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-                      <div style={{ padding: '12px 0' }}>
-                        <p className="text-sm font-semibold text-white" style={{ marginBottom: '16px' }}>受信ファイルのデフォルト保存先</p>
-                        <input 
-                          type="text" 
-                          value={saveDirectory === "Downloads" ? "システムダウンロードフォルダ" : customSaveDir} 
-                          readOnly
-                          className="w-full bg-surface-secondary border border-glass-border rounded-xl text-xs text-text-secondary truncate"
-                          style={{ padding: '16px 20px', minHeight: '52px', marginBottom: '16px' }}
-                        />
-                        <button
-                          onClick={async () => {
-                            if (isTauri) {
-                              try {
-                                const { open } = await import("@tauri-apps/plugin-dialog");
-                                const selected = await open({
-                                  directory: true,
-                                  multiple: false,
-                                });
-                                if (selected && typeof selected === "string") {
-                                  setCustomSaveDir(selected);
-                                  setSaveDirectory("custom");
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                      {isTauri ? (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', padding: '8px 0' }}>
+                            <div style={{ flex: 1 }}>
+                              <p className="text-sm font-semibold text-white" style={{ marginBottom: '4px' }}>保存先を毎回選択（その都度聞く）</p>
+                              <p className="text-xs text-text-secondary">ファイル受信時に保存先を選択するダイアログを表示</p>
+                            </div>
+                            <label className="switch">
+                              <input 
+                                type="checkbox" 
+                                checked={askSavePath} 
+                                onChange={(e) => {
+                                  setAskSavePath(e.target.checked);
+                                  localStorage.setItem("crossdrop-ask-save-path", String(e.target.checked));
+                                }} 
+                              />
+                              <span className="slider"></span>
+                            </label>
+                          </div>
+                          
+                          <div className="h-px bg-glass-border/40" />
+
+                          <div style={{ padding: '8px 0', opacity: askSavePath ? 0.5 : 1, pointerEvents: askSavePath ? 'none' : 'auto' }}>
+                            <p className="text-sm font-semibold text-white" style={{ marginBottom: '16px' }}>既定の保存先フォルダ</p>
+                            <input 
+                              type="text" 
+                              value={saveDirectory === "Downloads" ? "システムダウンロードフォルダ" : customSaveDir} 
+                              readOnly
+                              className="w-full bg-surface-secondary border border-glass-border rounded-xl text-xs text-text-secondary truncate"
+                              style={{ padding: '16px 20px', minHeight: '52px', marginBottom: '16px' }}
+                            />
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const { open } = await import("@tauri-apps/plugin-dialog");
+                                  const selected = await open({
+                                    directory: true,
+                                    multiple: false,
+                                  });
+                                  if (selected && typeof selected === "string") {
+                                    setCustomSaveDir(selected);
+                                    localStorage.setItem("crossdrop-custom-save-dir", selected);
+                                    setSaveDirectory("custom");
+                                    localStorage.setItem("crossdrop-save-directory", "custom");
+                                  }
+                                } catch (e) {
+                                  console.error("Tauri dialog open error:", e);
                                 }
-                              } catch (e) {
-                                console.error("Tauri dialog open error:", e);
-                              }
-                            }
-                          }}
-                          className="w-full bg-surface-secondary/40 hover:bg-surface-secondary border border-glass-border rounded-xl text-xs font-bold transition-all hover:scale-[1.01] cursor-pointer text-center text-white"
-                          style={{ padding: '16px 20px', minHeight: '52px' }}
-                        >
-                          保存フォルダを変更する
-                        </button>
-                      </div>
+                              }}
+                              className="w-full bg-surface-secondary/40 hover:bg-surface-secondary border border-glass-border rounded-xl text-xs font-bold transition-all hover:scale-[1.01] cursor-pointer text-center text-white"
+                              style={{ padding: '16px 20px', minHeight: '52px' }}
+                            >
+                              保存フォルダを変更する
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="bg-surface-secondary/15 border border-glass-border/40 rounded-2xl p-6 text-center text-xs text-text-secondary leading-relaxed">
+                          ブラウザ環境では、ブラウザで設定された既定のダウンロード先に保存されます。
+                        </div>
+                      )}
 
                       <div className="h-px bg-glass-border/40" />
 
@@ -2019,6 +2138,23 @@ export default function CrossDropApp() {
           />
         )}
       </AnimatePresence>
+
+      {contextMenu.visible && (
+        <div 
+          className="fixed z-50 glass-panel py-1.5 rounded-xl shadow-lg border border-glass-border/60 bg-surface-secondary/95 min-w-[160px]"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <button
+            onClick={() => {
+              handleRevealFile(contextMenu.savedPath);
+              setContextMenu({ ...contextMenu, visible: false });
+            }}
+            className="w-full text-left px-4 py-2 hover:bg-accent/15 hover:text-accent text-xs font-semibold text-white transition-colors cursor-pointer"
+          >
+            保存フォルダを開く
+          </button>
+        </div>
+      )}
     </div>
   );
 }
